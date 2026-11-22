@@ -1,0 +1,5 @@
+build/
+.vs/
+*.user
+*.mp4
+*.m0.txt

@@ -1,0 +1,72 @@
+#pragma once
+#include "audio.h"
+#include "audio_encoder.h"
+#include "capture.h"
+#include "replay_ring.h"
+#include "video_encoder.h"
+#include "videoproc.h"
+
+#include <atomic>
+#include <memory>
+#include <string>
+#include <thread>
+
+namespace wl {
+
+struct SessionConfig {
+    winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
+    std::wstring name;  // used in clip file names (game exe or "Masaustu")
+    std::wstring dir;
+    double minutes = 1.0;
+    UINT fps = 60;
+    UINT kbps = 15000;
+    bool hevc = true;
+    bool cursor = true;
+    bool sound = true;
+};
+
+// One continuous recording into the replay buffer (one game, or the desktop):
+// capture -> NV12 -> NVENC + 5 audio tracks -> ReplayRing. Runs its own video thread.
+class RecordingSession {
+public:
+    explicit RecordingSession(SessionConfig config);
+    ~RecordingSession();
+    RecordingSession(const RecordingSession&) = delete;
+    RecordingSession& operator=(const RecordingSession&) = delete;
+
+    void Start();  // throws on failure
+    void Stop();
+    void RequestSave() { saveRequested_ = true; }
+
+    bool Ended() const { return ended_; }  // target closed or fatal error
+    const std::wstring& Name() const { return config_.name; }
+    double BufferedSeconds() const { return ring_.BufferedHns() / 1e7; }
+    double BufferMB() const { return ring_.Bytes() / (1024.0 * 1024.0); }
+    uint64_t SkippedFrames() const { return video_.SkippedFrames(); }
+
+private:
+    void Loop();
+    void SaveNow();
+
+    SessionConfig config_;
+    GpuDevice gpu_;
+    com_ptr<IMFDXGIDeviceManager> deviceManager_;
+    std::unique_ptr<CaptureSource> capture_;
+    VideoConverter converter_;
+    com_ptr<IMFVideoSampleAllocatorEx> allocator_;
+    ReplayRing ring_{kTrackCount};
+    VideoEncoder video_;
+    AacEncoderBank aac_;
+    AudioEngine audio_;
+    UINT outW_ = 0, outH_ = 0;
+
+    std::thread thread_;
+    std::thread saver_;
+    std::atomic<bool> stop_{false}, ended_{false}, saveRequested_{false}, saving_{false};
+    uint64_t frames_ = 0;
+};
+
+// Picks Sonar's Game/Chat/Media/Mic endpoints (or fallbacks) for the audio engine.
+void SetupAudioSources(AudioEngine& engine, bool logChoices);
+
+}  // namespace wl
