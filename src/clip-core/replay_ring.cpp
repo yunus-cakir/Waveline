@@ -48,7 +48,7 @@ void ReplayRing::TrimLocked() {
     }
 }
 
-bool ReplayRing::TakeSnapshot(int64_t durationHns, Snapshot& out) const {
+bool ReplayRing::TakeSnapshot(int64_t durationHns, Snapshot& out, bool trimToAudio) const {
     std::lock_guard lock(mutex_);
     if (video_.empty()) return false;
     const int64_t want = video_.back().pts + video_.back().duration - durationHns;
@@ -64,8 +64,9 @@ bool ReplayRing::TakeSnapshot(int64_t durationHns, Snapshot& out) const {
     // Audio runs ~150 ms behind real time, so its newest packet ends before the newest
     // video frame. End the clip where every track still has data.
     int64_t end = video_.back().pts + video_.back().duration;
-    for (const auto& track : audio_)
-        if (!track.empty()) end = std::min(end, track.back().pts + track.back().duration);
+    if (trimToAudio)
+        for (const auto& track : audio_)
+            if (!track.empty()) end = std::min(end, track.back().pts + track.back().duration);
 
     for (size_t i = start; i < video_.size() && video_[i].pts + video_[i].duration <= end; ++i)
         out.video.push_back(video_[i]);

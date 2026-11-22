@@ -27,7 +27,9 @@ public:
     };
     // The last `durationHns` of material, starting at the keyframe at or just before the
     // requested start (clips are never shorter than asked, at most ~1 GOP longer).
-    bool TakeSnapshot(int64_t durationHns, Snapshot& out) const;
+    // `trimToAudio`: end where every audio track still has data (for clips). Manual
+    // recording seeds itself without trimming so the live packets continue seamlessly.
+    bool TakeSnapshot(int64_t durationHns, Snapshot& out, bool trimToAudio = true) const;
 
     int64_t BufferedHns() const;
     uint64_t Bytes() const { return bytes_; }

@@ -2,6 +2,7 @@
 #include "audio.h"
 #include "audio_encoder.h"
 #include "capture.h"
+#include "manual_recorder.h"
 #include "replay_ring.h"
 #include "video_encoder.h"
 #include "videoproc.h"
@@ -23,6 +24,7 @@ struct SessionConfig {
     bool hevc = true;
     bool cursor = true;
     bool sound = true;
+    double splitMinutes = 0;  // manual recording: start a new file every N minutes (0 = off)
 };
 
 // One continuous recording into the replay buffer (one game, or the desktop):
@@ -38,6 +40,12 @@ public:
     void Stop();
     void RequestSave() { saveRequested_ = true; }
 
+    // Manual recording, fed by the same encoder as the replay buffer.
+    void StartRecording();
+    void StopRecording();
+    bool Recording() const { return recorder_ != nullptr; }
+    double RecordingSeconds();
+
     bool Ended() const { return ended_; }  // target closed or fatal error
     const std::wstring& Name() const { return config_.name; }
     double BufferedSeconds() const { return ring_.BufferedHns() / 1e7; }
@@ -47,6 +55,13 @@ public:
 private:
     void Loop();
     void SaveNow();
+    void OnVideoPacket(Packet&& p);
+    void OnAudioPacket(UINT track, Packet&& p);
+
+    // Packets go to the ring and, while recording, to the recorder. One lock makes starting
+    // a recording (seed from the ring + attach) atomic with respect to new packets.
+    std::mutex tapMutex_;
+    std::unique_ptr<ManualRecorder> recorder_;
 
     SessionConfig config_;
     GpuDevice gpu_;

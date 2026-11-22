@@ -127,8 +127,8 @@ void RecordingSession::Start() {
 
     ring_.SetDuration(static_cast<int64_t>(config_.minutes * 60.0 * kHns));
     video_.Init({outW_, outH_, config_.fps, config_.kbps, config_.hevc}, deviceManager_.get(),
-                [this](Packet&& p) { ring_.PushVideo(std::move(p)); });
-    aac_.Init(kTrackCount, 192, [this](UINT track, Packet&& p) { ring_.PushAudio(track, std::move(p)); });
+                [this](Packet&& p) { OnVideoPacket(std::move(p)); });
+    aac_.Init(kTrackCount, 192, [this](UINT track, Packet&& p) { OnAudioPacket(track, std::move(p)); });
     SetupAudioSources(audio_, false);
 
     thread_ = std::thread(&RecordingSession::Loop, this);
@@ -228,6 +228,63 @@ void RecordingSession::SaveNow() {
     });
 }
 
+void RecordingSession::OnVideoPacket(Packet&& p) {
+    std::lock_guard lock(tapMutex_);
+    if (recorder_) recorder_->PushVideo(p);
+    ring_.PushVideo(std::move(p));
+}
+
+void RecordingSession::OnAudioPacket(UINT track, Packet&& p) {
+    std::lock_guard lock(tapMutex_);
+    if (recorder_) recorder_->PushAudio(track, p);
+    ring_.PushAudio(track, std::move(p));
+}
+
+void RecordingSession::StartRecording() {
+    std::lock_guard lock(tapMutex_);
+    if (recorder_) return;
+
+    RecorderConfig rc;
+    rc.basePath = ClipPath(config_.dir, config_.name + L"__kayit");
+    rc.basePath.resize(rc.basePath.size() - 4);  // drop ".mp4"
+    rc.videoType = video_.OutputTypeForMux();
+    for (int t = 0; t < kTrackCount; ++t) {
+        rc.audioTypes.push_back(aac_.OutputTypeForMux(static_cast<UINT>(t)));
+        rc.audioTrackNames.push_back(TrackName(static_cast<Track>(t)));
+    }
+    rc.splitMinutes = config_.splitMinutes;
+
+    auto recorder = std::make_unique<ManualRecorder>();
+    recorder->Start(std::move(rc));
+    // Start at the newest keyframe already in the buffer (at most ~1 s before the press).
+    ReplayRing::Snapshot seed;
+    if (ring_.TakeSnapshot(1, seed, false)) {
+        for (const auto& p : seed.video) recorder->PushVideo(p);
+        for (size_t t = 0; t < seed.audio.size(); ++t)
+            for (const auto& p : seed.audio[t]) recorder->PushAudio(static_cast<UINT>(t), p);
+    }
+    recorder_ = std::move(recorder);
+    Log("Kayit basladi (manuel)");
+    if (config_.sound) PlaySoundW(L"DeviceConnect", nullptr, SND_ALIAS | SND_ASYNC);
+}
+
+void RecordingSession::StopRecording() {
+    std::unique_ptr<ManualRecorder> recorder;
+    {
+        std::lock_guard lock(tapMutex_);
+        recorder = std::move(recorder_);
+    }
+    if (!recorder) return;
+    recorder->Stop();  // closes the last part; conversion continues in the background
+    Log("Kayit durdu (manuel): %.1f sn, %d dosya", recorder->Seconds(), recorder->FileCount());
+    if (config_.sound) PlaySoundW(L"DeviceDisconnect", nullptr, SND_ALIAS | SND_ASYNC);
+}
+
+double RecordingSession::RecordingSeconds() {
+    std::lock_guard lock(tapMutex_);
+    return recorder_ ? recorder_->Seconds() : 0.0;
+}
+
 void RecordingSession::Stop() {
     stop_ = true;
     if (thread_.joinable()) thread_.join();
@@ -235,6 +292,7 @@ void RecordingSession::Stop() {
     if (capture_) capture_->Stop();
     audio_.StopAt(static_cast<int64_t>(frames_) * kSampleRate / config_.fps);
     video_.Shutdown();
+    StopRecording();  // after the encoders flushed, so the recording gets every packet
 }
 
 }  // namespace wl

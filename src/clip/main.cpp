@@ -5,6 +5,7 @@
 // With --desktop, the chosen monitor is recorded whenever no game is running.
 // The hotkey saves the last N minutes of whatever is being recorded.
 
+#include "background.h"
 #include "game_detector.h"
 #include "metrics.h"
 #include "session.h"
@@ -26,6 +27,7 @@ namespace {
 
 std::atomic<bool> g_stop{false};
 std::atomic<bool> g_saveRequested{false};
+std::atomic<bool> g_recordToggle{false};
 
 BOOL WINAPI OnConsoleCtrl(DWORD type) {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
@@ -53,6 +55,9 @@ struct Options {
     bool sound = true;
     std::wstring dir;
     Hotkey hotkey;
+    Hotkey recordHotkey{MOD_CONTROL | MOD_ALT, VK_F9, "Ctrl+Alt+F9"};
+    double splitMinutes = 0;
+    int testRecordStart = -1, testRecordStop = -1;  // test aid: seconds after session start
     std::set<std::wstring> exclude = GameDetector::DefaultExcludes();
     std::set<std::wstring> include;
     int autoSaveSec = 0;   // test aid: save a clip N s after a session starts
@@ -112,13 +117,15 @@ void PrintUsage() {
         "  --minutes M          geriye donuk sure, 0.5-10 dk (varsayilan 1)\n"
         "  --dir KLASOR         klip klasoru (varsayilan: Videolar\\Waveline)\n"
         "  --hotkey TUSLAR      klip kisayolu (varsayilan Ctrl+Alt+F10)\n"
+        "  --record-hotkey T    manuel kayit baslat/durdur (varsayilan Ctrl+Alt+F9)\n"
+        "  --split-minutes M    manuel kaydi M dakikada bir yeni dosyaya bol (varsayilan kapali)\n"
         "  --desktop            oyun yokken masaustunu de kaydet\n"
         "  --monitor N          masaustu modunda kaydedilecek monitor (--list ile bakin)\n"
         "  --include a,b        bu exe'ler pencereli olsa da oyun sayilir\n"
         "  --exclude a,b        bu exe'ler asla kaydedilmez (varsayilan listeye eklenir)\n"
         "  --list               monitorleri ve varsayilan haric listesini goster\n"
         "  --fps N | --bitrate KBPS | --codec hevc|h264 | --no-cursor | --no-sound\n"
-        "  --auto-save SN | --exit-after SN   (test)\n\n"
+        "  --auto-save SN | --exit-after SN | --test-record A:B   (test)\n\n"
         "Oyun tam ekran/borderless acildiginda kayit kendiliginden baslar. Ctrl+C ile cikis.\n");
 }
 
@@ -144,6 +151,15 @@ Options ParseArgs(int argc, wchar_t** argv) {
         else if (a == L"--no-cursor") o.cursor = false;
         else if (a == L"--no-sound") o.sound = false;
         else if (a == L"--auto-save") o.autoSaveSec = std::stoi(next());
+        else if (a == L"--record-hotkey") o.recordHotkey = ParseHotkey(next());
+        else if (a == L"--split-minutes") o.splitMinutes = std::stod(next());
+        else if (a == L"--test-record") {
+            const std::wstring v = next();
+            const size_t colon = v.find(L':');
+            if (colon == std::wstring::npos) throw std::runtime_error("--test-record BASLA:BITIR (saniye)");
+            o.testRecordStart = std::stoi(v.substr(0, colon));
+            o.testRecordStop = std::stoi(v.substr(colon + 1));
+        }
         else if (a == L"--exit-after") o.exitAfterSec = std::stoi(next());
         else if (a == L"--help" || a == L"-h" || a == L"/?") { PrintUsage(); std::exit(0); }
         else throw std::runtime_error("Bilinmeyen arguman: " + ToUtf8(a));
@@ -156,16 +172,22 @@ Options ParseArgs(int argc, wchar_t** argv) {
 
 class HotkeyListener {
 public:
-    void Start(const Hotkey& hk) {
-        thread_ = std::thread([this, hk] {
+    // id 1 = save clip, id 2 = start/stop manual recording
+    void Start(const Hotkey& clip, const Hotkey& record) {
+        thread_ = std::thread([this, clip, record] {
             MSG msg;
             PeekMessageW(&msg, nullptr, WM_USER, WM_USER, PM_NOREMOVE);
             threadId_ = GetCurrentThreadId();
-            ok_ = RegisterHotKey(nullptr, 1, hk.modifiers | MOD_NOREPEAT, hk.vk) != FALSE;
+            clipOk_ = RegisterHotKey(nullptr, 1, clip.modifiers | MOD_NOREPEAT, clip.vk) != FALSE;
+            recordOk_ = RegisterHotKey(nullptr, 2, record.modifiers | MOD_NOREPEAT, record.vk) != FALSE;
             ready_ = true;
-            while (GetMessageW(&msg, nullptr, 0, 0) > 0)
-                if (msg.message == WM_HOTKEY) g_saveRequested = true;
-            if (ok_) UnregisterHotKey(nullptr, 1);
+            while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+                if (msg.message != WM_HOTKEY) continue;
+                if (msg.wParam == 1) g_saveRequested = true;
+                else if (msg.wParam == 2) g_recordToggle = true;
+            }
+            if (clipOk_) UnregisterHotKey(nullptr, 1);
+            if (recordOk_) UnregisterHotKey(nullptr, 2);
         });
         while (!ready_) Sleep(1);
     }
@@ -173,12 +195,13 @@ public:
         if (threadId_) PostThreadMessageW(threadId_, WM_QUIT, 0, 0);
         if (thread_.joinable()) thread_.join();
     }
-    bool Ok() const { return ok_; }
+    bool ClipOk() const { return clipOk_; }
+    bool RecordOk() const { return recordOk_; }
 
 private:
     std::thread thread_;
     std::atomic<DWORD> threadId_{0};
-    std::atomic<bool> ready_{false}, ok_{false};
+    std::atomic<bool> ready_{false}, clipOk_{false}, recordOk_{false};
 };
 
 struct MonitorEntry {
@@ -251,8 +274,10 @@ int Run(const Options& opt) {
     detector.Start();
 
     HotkeyListener hotkey;
-    hotkey.Start(opt.hotkey);
-    if (!hotkey.Ok()) Warn("%s kisayolu alinamadi (baska bir uygulama kullaniyor olabilir)", opt.hotkey.text.c_str());
+    hotkey.Start(opt.hotkey, opt.recordHotkey);
+    if (!hotkey.ClipOk()) Warn("%s kisayolu alinamadi (baska bir uygulama kullaniyor olabilir)", opt.hotkey.text.c_str());
+    if (!hotkey.RecordOk())
+        Warn("%s kisayolu alinamadi (baska bir uygulama kullaniyor olabilir)", opt.recordHotkey.text.c_str());
 
     // Log the audio routing once; every session reuses the same choice logic.
     {
@@ -265,7 +290,7 @@ int Run(const Options& opt) {
     HWND gameWindow = nullptr;
     std::unique_ptr<RecordingSession> session;
     int64_t sessionStart = 0, lastDesktopAttempt = 0;
-    bool autoSaved = false;
+    bool autoSaved = false, testRecordStarted = false, testRecordStopped = false;
 
     auto baseConfig = [&]() {
         SessionConfig c;
@@ -276,6 +301,7 @@ int Run(const Options& opt) {
         c.hevc = opt.hevc;
         c.cursor = opt.cursor;
         c.sound = opt.sound;
+        c.splitMinutes = opt.splitMinutes;
         return c;
     };
     auto stopSession = [&]() {
@@ -293,7 +319,7 @@ int Run(const Options& opt) {
             session = std::move(s);
             mode = m;
             sessionStart = QpcNow100ns();
-            autoSaved = false;
+            autoSaved = testRecordStarted = testRecordStopped = false;
         } catch (const HrError& e) {
             Warn("Kayit baslatilamadi: %s (0x%08X)", e.what(), static_cast<unsigned>(e.hr));
         } catch (const winrt::hresult_error& e) {
@@ -303,8 +329,9 @@ int Run(const Options& opt) {
         }
     };
 
-    Log("Hazir. Oyun bekleniyor%s. Klip: %s, cikis: Ctrl+C. Klasor: %s", opt.desktop ? " (masaustu modu acik)" : "",
-        opt.hotkey.text.c_str(), ToUtf8(opt.dir).c_str());
+    Log("Hazir. Oyun bekleniyor%s. Klip: %s, kayit: %s, cikis: Ctrl+C. Klasor: %s",
+        opt.desktop ? " (masaustu modu acik)" : "", opt.hotkey.text.c_str(), opt.recordHotkey.text.c_str(),
+        ToUtf8(opt.dir).c_str());
 
     Metrics metrics;
     const int64_t runStart = QpcNow100ns();
@@ -351,21 +378,42 @@ int Run(const Options& opt) {
             autoSaved = true;
             g_saveRequested = true;
         }
+        if (opt.testRecordStart >= 0 && session) {
+            const int64_t elapsed = now - sessionStart;
+            if (!testRecordStarted && elapsed >= opt.testRecordStart * kHns) {
+                testRecordStarted = true;
+                g_recordToggle = true;
+            } else if (testRecordStarted && !testRecordStopped && elapsed >= opt.testRecordStop * kHns) {
+                testRecordStopped = true;
+                g_recordToggle = true;
+            }
+        }
         if (opt.exitAfterSec > 0 && now - runStart >= opt.exitAfterSec * kHns) g_stop = true;
 
         if (g_saveRequested.exchange(false)) {
             if (session) session->RequestSave();
             else Warn("Su an kayit yapilmiyor (oyun yok, masaustu modu kapali)");
         }
+        if (g_recordToggle.exchange(false)) {
+            if (!session) Warn("Su an kayit yapilamaz (oyun yok, masaustu modu kapali)");
+            else if (session->Recording()) session->StopRecording();
+            else session->StartRecording();
+        }
 
         if (now - lastStatus >= 10 * kHns) {
             lastStatus = now;
             metrics.Tick();
             const auto& m = metrics.Last();
-            if (session)
-                Log("Durum: %s | tampon %.0f sn (%.0f MB) | CPU %%%.1f | NVENC %%%.0f | RAM %.0f MB",
-                    ToUtf8(session->Name()).c_str(), session->BufferedSeconds(), session->BufferMB(), m.cpuPercent,
+            if (session) {
+                char rec[48] = "";
+                if (session->Recording()) {
+                    const int s = static_cast<int>(session->RecordingSeconds());
+                    snprintf(rec, sizeof(rec), " | KAYIT %02d:%02d:%02d", s / 3600, s / 60 % 60, s % 60);
+                }
+                Log("Durum: %s%s | tampon %.0f sn (%.0f MB) | CPU %%%.1f | NVENC %%%.0f | RAM %.0f MB",
+                    ToUtf8(session->Name()).c_str(), rec, session->BufferedSeconds(), session->BufferMB(), m.cpuPercent,
                     m.nvencPercent, m.workingSetMB);
+            }
             else
                 Log("Durum: bosta | CPU %%%.2f | RAM %.0f MB", m.cpuPercent, m.workingSetMB);
         }
@@ -374,6 +422,8 @@ int Run(const Options& opt) {
     stopSession();
     hotkey.Stop();
     detector.Stop();
+    if (BackgroundTasks::Instance().Pending() > 0) Log("Kayit MP4'e donusturuluyor, bekleniyor...");
+    BackgroundTasks::Instance().JoinAll();
     Log("Cikiliyor");
     return 0;
 }

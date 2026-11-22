@@ -4,7 +4,7 @@ SteelSeries Moments ve Sonar'ın hafif, açık kaynak karşılıkları.
 
 | Bileşen | Karşılığı | Durum |
 |---|---|---|
-| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M2 (konsol) |
+| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M3 (konsol) |
 | **Waveline Mix** | Sonar: Game / Chat / Media / Mic katmanları, Personal + Stream Mix | Planlandı |
 
 Analiz, mimari ve kararlar: [ANALIZ_VE_PLAN.md](ANALIZ_VE_PLAN.md)
@@ -37,7 +37,7 @@ Klasör yapısı:
 
 ---
 
-## `WavelineClip` (M2: otomatik algılama + geriye dönük kayıt)
+## `WavelineClip` (otomatik algılama, geriye dönük kayıt, manuel kayıt)
 
 Arka planda bekler, oyun açılınca kendiliğinden kayda başlar. Son N dakikayı RAM'de sıkıştırılmış paketler olarak tutar. Kısayola basınca klibi **yeniden kodlamadan**, yaklaşık 0.1–0.4 saniyede MP4 olarak yazar.
 
@@ -58,7 +58,9 @@ Programı açık bırakıp oyunu başlatın. Klip için **Ctrl+Alt+F10**, çık�
 |---|---|
 | `--minutes M` | Geriye dönük süre, 0.5–10 dk (varsayılan 1) |
 | `--dir KLASÖR` | Kliplerin klasörü (varsayılan: Videolar\Waveline) |
-| `--hotkey TUŞLAR` | Ör. `ctrl+alt+f10`, `alt+f9`, `ctrl+shift+s` |
+| `--hotkey TUŞLAR` | Klip kısayolu, ör. `ctrl+alt+f10`, `alt+f9`, `ctrl+shift+s` |
+| `--record-hotkey TUŞLAR` | Manuel kayıt başlat/durdur (varsayılan Ctrl+Alt+F9) |
+| `--split-minutes M` | Manuel kaydı M dakikada bir yeni dosyaya böl (varsayılan kapalı) |
 | `--desktop` | Oyun yokken masaüstünü kaydet |
 | `--monitor N` | Masaüstü modunun monitörü (`--list` ile numaralara bakın) |
 | `--include a,b` | Bu exe'ler pencereli modda da oyun sayılır (ör. `--include TravellersRest`) |
@@ -66,7 +68,21 @@ Programı açık bırakıp oyunu başlatın. Klip için **Ctrl+Alt+F10**, çık�
 | `--list` | Monitörleri ve hariç listesini göster |
 | `--fps`, `--bitrate`, `--codec`, `--no-cursor` | Kalite ayarları |
 | `--no-sound` | Klip alındı sesini kapat |
-| `--auto-save SN`, `--exit-after SN` | (test yardımcıları) |
+| `--auto-save SN`, `--exit-after SN`, `--test-record A:B` | (test yardımcıları) |
+
+### Manuel kayıt (M3)
+
+Kayıt yapılırken (oyun ya da masaüstü) **Ctrl+Alt+F9** ile başlar, tekrar basınca durur.
+- **Encoder:** Geriye dönük tamponu besleyen encoder'ı kullanır; ikinci bir NVENC oturumu açılmaz.
+- **Eşzamanlılık:** Kayıt sürerken Ctrl+Alt+F10 ile klip almaya devam edebilirsiniz.
+- **Başlangıç anı:** Kayıt, tamponda bekleyen son keyframe'den başlar; yani tuşa basmadan en fazla ~1 sn öncesi de kayda girer.
+- **Dosya:** `oyunexe__kayit__YYYY-MM-DD__HH-mm-ss.mp4` olarak yazılır ve kayıt durduğu anda hazırdır; dönüştürme beklenmez. `--split-minutes` ile `_2`, `_3`… parçalarına bölünür.
+- **Kaydın bitişi:** Oyun kapanınca kayıt da kendiliğinden durur.
+- **Çökme yedeği:** Kayıt sürerken yanında `...kayit....parts\` klasörüne 10 saniyelik, tek başına oynatılabilen yedek bölümler yazılır. Program normal kapanırsa bu klasör silinir. Program ya da bilgisayar çökerse asıl MP4 açılmaz, ama bölümler durur: en fazla son ~10 sn kaybolur. Bölümleri tek dosyada birleştirmek için:
+  ```powershell
+  cd "E:\Records\oyun__kayit__....parts"; (Get-ChildItem *.mp4 | Sort-Object Name | ForEach-Object { "file '$($_.Name)'" }) | Set-Content list.txt; ffmpeg -f concat -safe 0 -i list.txt -map 0 -c copy ..\kurtarilan.mp4
+  ```
+  (Otomatik kurtarma M5'te gelecek.)
 
 Klip özellikleri:
 - **Dosya adı:** `oyunexe__YYYY-MM-DD__HH-mm-ss.mp4`; masaüstü için `Masaustu__...`.
