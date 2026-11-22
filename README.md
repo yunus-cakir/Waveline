@@ -4,7 +4,7 @@ SteelSeries Moments ve Sonar'ın hafif, açık kaynak karşılıkları.
 
 | Bileşen | Karşılığı | Durum |
 |---|---|---|
-| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M3 (konsol) |
+| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M4 (tepsi + ayarlar) |
 | **Waveline Mix** | Sonar: Game / Chat / Media / Mic katmanları, Personal + Stream Mix | Planlandı |
 
 Analiz, mimari ve kararlar: [ANALIZ_VE_PLAN.md](ANALIZ_VE_PLAN.md)
@@ -20,63 +20,65 @@ Analiz, mimari ve kararlar: [ANALIZ_VE_PLAN.md](ANALIZ_VE_PLAN.md)
 
 ## Derleme
 
-Visual Studio'da `Waveline.sln` dosyasını açıp **Release | x64** derleyin, ya da:
-
 ```powershell
-& "C:\Library\Apps\Visual Studio\MSBuild\Current\Bin\MSBuild.exe" Waveline.sln /p:Configuration=Release /p:Platform=x64 /m
+.\build.ps1
 ```
-
-Çıktılar `build\x64\Release\` altında:
-- `WavelineClip.exe` — otomatik algılama + geriye dönük kayıt
+Betik C++ motorunu (MSBuild) ve ayarlar penceresini (.NET 8) derler. Çıktılar `build\x64\Release\` altına gider:
+- `WavelineClip.exe` — arka plan motoru (tepsi simgesi)
+- `WavelineSettings.exe` — ayarlar penceresi
 - `WavelineClipProto.exe` — M0 ölçüm prototipi
 
 Klasör yapısı:
-- `src\clip-core\` — ortak motor: yakalama, GPU dönüşümü, NVENC, ses, halka, MP4
-- `src\clip\` — WavelineClip uygulaması
+- `src\clip-core\` — ortak motor: yakalama, GPU dönüşümü, NVENC, ses, halka, MP4, manuel kayıt
+- `src\clip\` — WavelineClip: algılama, oturumlar, tepsi, ayarlar, bildirim sesi
+- `src\settings\` — WPF ayarlar penceresi
 - `src\clip-proto\` — M0 prototipi
 
 ---
 
-## `WavelineClip` (otomatik algılama, geriye dönük kayıt, manuel kayıt)
+## `WavelineClip`
 
-Arka planda bekler, oyun açılınca kendiliğinden kayda başlar. Son N dakikayı RAM'de sıkıştırılmış paketler olarak tutar. Kısayola basınca klibi **yeniden kodlamadan**, yaklaşık 0.1–0.4 saniyede MP4 olarak yazar.
+`WavelineClip.exe`'yi çalıştırın; sistem tepsisine yerleşir ve arka planda bekler. Oyun açılınca kendiliğinden kayda başlar. Son N dakikayı RAM'de sıkıştırılmış paketler olarak tutar.
 
-```powershell
-& "C:\Library\Projects\Visual Studio\Waveline\build\x64\Release\WavelineClip.exe" --minutes 2 --dir E:\Records
-```
-Programı açık bırakıp oyunu başlatın. Klip için **Ctrl+Alt+F10**, çıkış için konsolda Ctrl+C.
+| Kısayol | İşlev |
+|---|---|
+| **Ctrl+Alt+F10** | Son N dakikayı klip olarak kaydet (yeniden kodlamadan, ~0.1–0.4 sn) |
+| **Ctrl+Alt+F9** | Manuel kaydı başlat / durdur |
+
+**Tepsi simgesi**
+- **Renkler:** Gri = oyun bekleniyor, turkuaz = geriye dönük kayıt açık, kırmızı = manuel kayıt sürüyor.
+- **Bilgi:** Üzerine gelince oyun adı, tampon süresi ve kayıt süresi görünür.
+- **Menü (sağ tık):** Klip kaydet, Kaydı başlat/durdur, Klasörü aç, Ayarlar…, Çıkış.
+- **Tıklama:** Simgeye tıklamak ayarları açar. Bildirime tıklamak dosyayı Gezgin'de gösterir.
+- **İkinci başlatma:** Program zaten çalışırken tekrar açılırsa ikinci bir kopya başlamaz, ayarlar penceresi açılır.
+
+**Ayarlar**
+- **Ayar dosyası:** `%APPDATA%\Waveline\clip.json`. Ayarlar penceresi bu dosyayı düzenler; motor değişikliği ~1 sn içinde **yeniden başlatmadan** uygular.
+- **Video ayarları:** Süre, klasör, codec ve FPS gibi ayarlar değişirse süren kayıt kapatılıp yeni ayarlarla devam edilir.
+- **Windows ile başlat:** Ayarlardan açılıp kapatılır (`HKCU\...\Run`).
+- **Log:** `%LOCALAPPDATA%\Waveline\clip.log`. Ayarlar penceresindeki "Log" düğmesiyle açılır.
+
+**Bildirim sesi kliplere girmez:** Sesler Sonar'ın sanal kanallarına değil, doğrudan kulaklığa çalınır.
+- **Otomatik seçim:** "Otomatik" seçeneği, Sonar'ın yerel API'sinden Personal Mix cihazını sorar (ör. HS80). Sonar yoksa varsayılan çıkış kullanılır.
+- **Güvenlik kuralı:** Uygun cihaz bulunamazsa ses çalınmaz; kliplere girmesindense hiç çalmaması tercih edilir.
+- **Windows bildirimi:** Bildirimler de sessizdir.
 
 **Nasıl çalışır**
 - **Oyun algılama:** Ön plandaki pencere monitörü başlık çubuğu olmadan kaplıyorsa (borderless/fullscreen) ya da Windows exclusive fullscreen bildiriyorsa, ve 1.5 sn böyle kalırsa oyun sayılır.
-- **Hariç tutulanlar:** Tarayıcılar, medya oynatıcılar, Discord, OBS, Explorer vb. tam ekran olsa da kaydedilmez. Liste için `--list`.
+- **Hariç tutulanlar:** Tarayıcılar, medya oynatıcılar, Discord, OBS, Explorer vb. tam ekran olsa da kaydedilmez. Ayarlardan liste eklenebilir; pencereli oyunlar "Pencereli de olsa kaydet" listesine yazılır.
 - **Kayıt süresi:** Oyun penceresi kapanana kadar kaydedilir; alt-tab yapınca kayıt durmaz.
-- **Masaüstü modu:** `--desktop` ile açılır; oyun yokken seçili monitör kaydedilir. Oyun açılınca otomatik oyuna, oyun kapanınca masaüstüne geçer. Parsec gibi sanal ekranlar seçilmez.
-- **Boşta yük:** Oyun yokken (ve masaüstü modu kapalıyken) yakalama ve encoder tamamen kapalıdır. Ölçülen: ~17 MB RAM, CPU ~%0.02.
+- **Masaüstü modu:** Ayarlardan açılır; oyun yokken seçili monitör kaydedilir. Parsec gibi sanal ekranlar otomatik seçilmez.
+- **Boşta yük:** Oyun yokken (ve masaüstü modu kapalıyken) yakalama ve encoder tamamen kapalıdır. Ölçülen: ~17 MB RAM, CPU ~%0.02. Ayarlar penceresi yalnızca açıkken çalışır.
 - **Anti-cheat:** Oyun algılama oyuna dokunmaz. Pencere olayları süreç dışından dinlenir, exe adı en düşük yetkiyle okunur.
 
-| Seçenek | Açıklama |
-|---|---|
-| `--minutes M` | Geriye dönük süre, 0.5–10 dk (varsayılan 1) |
-| `--dir KLASÖR` | Kliplerin klasörü (varsayılan: Videolar\Waveline) |
-| `--hotkey TUŞLAR` | Klip kısayolu, ör. `ctrl+alt+f10`, `alt+f9`, `ctrl+shift+s` |
-| `--record-hotkey TUŞLAR` | Manuel kayıt başlat/durdur (varsayılan Ctrl+Alt+F9) |
-| `--split-minutes M` | Manuel kaydı M dakikada bir yeni dosyaya böl (varsayılan kapalı) |
-| `--desktop` | Oyun yokken masaüstünü kaydet |
-| `--monitor N` | Masaüstü modunun monitörü (`--list` ile numaralara bakın) |
-| `--include a,b` | Bu exe'ler pencereli modda da oyun sayılır (ör. `--include TravellersRest`) |
-| `--exclude a,b` | Bu exe'ler hiç kaydedilmez (varsayılan listeye eklenir) |
-| `--list` | Monitörleri ve hariç listesini göster |
-| `--fps`, `--bitrate`, `--codec`, `--no-cursor` | Kalite ayarları |
-| `--no-sound` | Klip alındı sesini kapat |
-| `--auto-save SN`, `--exit-after SN`, `--test-record A:B` | (test yardımcıları) |
-
+Komut satırı (tanı/test): `--console` (log'u konsola da yaz), `--list`, `--auto-save SN`, `--exit-after SN`, `--test-record A:B`.
 ### Manuel kayıt (M3)
 
 Kayıt yapılırken (oyun ya da masaüstü) **Ctrl+Alt+F9** ile başlar, tekrar basınca durur.
 - **Encoder:** Geriye dönük tamponu besleyen encoder'ı kullanır; ikinci bir NVENC oturumu açılmaz.
 - **Eşzamanlılık:** Kayıt sürerken Ctrl+Alt+F10 ile klip almaya devam edebilirsiniz.
 - **Başlangıç anı:** Kayıt, tamponda bekleyen son keyframe'den başlar; yani tuşa basmadan en fazla ~1 sn öncesi de kayda girer.
-- **Dosya:** `oyunexe__kayit__YYYY-MM-DD__HH-mm-ss.mp4` olarak yazılır ve kayıt durduğu anda hazırdır; dönüştürme beklenmez. `--split-minutes` ile `_2`, `_3`… parçalarına bölünür.
+- **Dosya:** `oyunexe__kayit__YYYY-MM-DD__HH-mm-ss.mp4` olarak yazılır ve kayıt durduğu anda hazırdır; dönüştürme beklenmez. ayarlardaki bölme seçeneğiyle `_2`, `_3`… parçalarına bölünür.
 - **Kaydın bitişi:** Oyun kapanınca kayıt da kendiliğinden durur.
 - **Çökme yedeği:** Kayıt sürerken yanında `...kayit....parts\` klasörüne 10 saniyelik, tek başına oynatılabilen yedek bölümler yazılır. Program normal kapanırsa bu klasör silinir. Program ya da bilgisayar çökerse asıl MP4 açılmaz, ama bölümler durur: en fazla son ~10 sn kaybolur. Bölümleri tek dosyada birleştirmek için:
   ```powershell

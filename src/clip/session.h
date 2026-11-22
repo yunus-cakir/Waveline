@@ -8,11 +8,14 @@
 #include "videoproc.h"
 
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
 
 namespace wl {
+
+enum class SessionEvent { ClipSaved, ClipFailed, RecordingStarted, RecordingStopped, RecordingReady };
 
 struct SessionConfig {
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
@@ -23,8 +26,9 @@ struct SessionConfig {
     UINT kbps = 15000;
     bool hevc = true;
     bool cursor = true;
-    bool sound = true;
     double splitMinutes = 0;  // manual recording: start a new file every N minutes (0 = off)
+    // Sounds/notifications are the app's job. Called from worker threads.
+    std::function<void(SessionEvent, const std::wstring& path, double seconds)> onEvent;
 };
 
 // One continuous recording into the replay buffer (one game, or the desktop):

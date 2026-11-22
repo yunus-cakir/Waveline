@@ -1,12 +1,15 @@
 #include "common.h"
 
 #include <cstdarg>
+#include <functional>
 #include <mutex>
+#include <share.h>
 
 namespace wl {
 
 namespace {
 std::mutex g_logMutex;
+FILE* g_logFile = nullptr;
 
 void VLog(const char* level, const char* fmt, va_list args) {
     SYSTEMTIME st;
@@ -17,8 +20,19 @@ void VLog(const char* level, const char* fmt, va_list args) {
     std::printf("\r[%02u:%02u:%02u.%03u] %s%s\n", st.wHour, st.wMinute, st.wSecond,
                 st.wMilliseconds, level, msg);
     std::fflush(stdout);
+    if (g_logFile) {
+        std::fprintf(g_logFile, "%04u-%02u-%02u %02u:%02u:%02u.%03u %s%s\n", st.wYear, st.wMonth, st.wDay, st.wHour,
+                     st.wMinute, st.wSecond, st.wMilliseconds, level, msg);
+        std::fflush(g_logFile);
+    }
 }
 }  // namespace
+
+void SetLogFile(const std::wstring& path) {
+    std::lock_guard lock(g_logMutex);
+    if (g_logFile) std::fclose(g_logFile);
+    g_logFile = _wfsopen(path.c_str(), L"w", _SH_DENYWR);
+}
 
 std::string ToUtf8(const wchar_t* w) {
     if (!w || !*w) return {};

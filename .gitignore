@@ -3,3 +3,5 @@ build/
 *.user
 *.mp4
 *.m0.txt
+src/settings/obj/
+src/settings/bin/

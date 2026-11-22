@@ -47,7 +47,7 @@
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NOMINMAX;UNICODE;_UNICODE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <SubSystem>Console</SubSystem>
+      <SubSystem>Windows</SubSystem>
       <AdditionalDependencies>d3d11.lib;dxgi.lib;mfplat.lib;mfreadwrite.lib;mfuuid.lib;mf.lib;windowsapp.lib;pdh.lib;avrt.lib;ole32.lib;wmcodecdspuuid.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
@@ -91,9 +91,12 @@
     <ClCompile Include="..\clip-core\replay_ring.cpp" />
     <ClCompile Include="..\clip-core\video_encoder.cpp" />
     <ClCompile Include="..\clip-core\videoproc.cpp" />
+    <ClCompile Include="config.cpp" />
     <ClCompile Include="game_detector.cpp" />
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="notify_sound.cpp" />
     <ClCompile Include="session.cpp" />
+    <ClCompile Include="tray.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\clip-core\audio.h" />
@@ -109,8 +112,11 @@
     <ClInclude Include="..\clip-core\replay_ring.h" />
     <ClInclude Include="..\clip-core\video_encoder.h" />
     <ClInclude Include="..\clip-core\videoproc.h" />
+    <ClInclude Include="config.h" />
     <ClInclude Include="game_detector.h" />
+    <ClInclude Include="notify_sound.h" />
     <ClInclude Include="session.h" />
+    <ClInclude Include="tray.h" />
   </ItemGroup>  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>
 

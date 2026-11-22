@@ -223,6 +223,7 @@ void ManualRecorder::FinishGroup() {
     if (!GetEnvironmentVariableW(L"WAVELINE_KEEP_PARTS", keep, 8)) std::filesystem::remove_all(partsDir_, ec);
     const bool named = Mp4SetTrackNames(finalPath_, "Video", config_.audioTrackNames);
     Log("Kayit hazir: %s%s", ToUtf8(finalPath_).c_str(), named ? "" : " [iz isimleri yazilamadi]");
+    if (config_.onFileReady) config_.onFileReady(finalPath_);
 }
 
 }  // namespace wl

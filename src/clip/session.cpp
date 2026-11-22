@@ -1,4 +1,4 @@
-#include "session.h"
+﻿#include "session.h"
 #include "clip_saver.h"
 
 #include <mferror.h>
@@ -218,11 +218,13 @@ void RecordingSession::SaveNow() {
             const auto r = SaveClip(in);
             Log("Klip kaydedildi: %s (%.1f sn, %.1f MB, %.2f sn surdu)%s", ToUtf8(in.path).c_str(), r.seconds,
                 r.bytes / (1024.0 * 1024.0), (QpcNow100ns() - t0) / 1e7, r.namesWritten ? "" : " [iz isimleri yazilamadi]");
-            if (config_.sound) PlaySoundW(L"SystemAsterisk", nullptr, SND_ALIAS | SND_ASYNC);
+            if (config_.onEvent) config_.onEvent(SessionEvent::ClipSaved, in.path, r.seconds);
         } catch (const HrError& e) {
             Warn("Klip kaydedilemedi: %s (0x%08X)", e.what(), static_cast<unsigned>(e.hr));
+            if (config_.onEvent) config_.onEvent(SessionEvent::ClipFailed, in.path, 0);
         } catch (const std::exception& e) {
             Warn("Klip kaydedilemedi: %s", e.what());
+            if (config_.onEvent) config_.onEvent(SessionEvent::ClipFailed, in.path, 0);
         }
         saving_ = false;
     });
@@ -253,6 +255,9 @@ void RecordingSession::StartRecording() {
         rc.audioTrackNames.push_back(TrackName(static_cast<Track>(t)));
     }
     rc.splitMinutes = config_.splitMinutes;
+    rc.onFileReady = [cb = config_.onEvent](const std::wstring& path) {
+        if (cb) cb(SessionEvent::RecordingReady, path, 0);
+    };
 
     auto recorder = std::make_unique<ManualRecorder>();
     recorder->Start(std::move(rc));
@@ -265,7 +270,7 @@ void RecordingSession::StartRecording() {
     }
     recorder_ = std::move(recorder);
     Log("Kayit basladi (manuel)");
-    if (config_.sound) PlaySoundW(L"DeviceConnect", nullptr, SND_ALIAS | SND_ASYNC);
+    if (config_.onEvent) config_.onEvent(SessionEvent::RecordingStarted, {}, 0);
 }
 
 void RecordingSession::StopRecording() {
@@ -277,7 +282,7 @@ void RecordingSession::StopRecording() {
     if (!recorder) return;
     recorder->Stop();  // closes the last part; conversion continues in the background
     Log("Kayit durdu (manuel): %.1f sn, %d dosya", recorder->Seconds(), recorder->FileCount());
-    if (config_.sound) PlaySoundW(L"DeviceDisconnect", nullptr, SND_ALIAS | SND_ASYNC);
+    if (config_.onEvent) config_.onEvent(SessionEvent::RecordingStopped, {}, recorder->Seconds());
 }
 
 double RecordingSession::RecordingSeconds() {

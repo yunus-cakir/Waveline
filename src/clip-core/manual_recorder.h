@@ -8,6 +8,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <deque>
+#include <functional>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -21,6 +22,7 @@ struct RecorderConfig {
     std::vector<com_ptr<IMFMediaType>> audioTypes;
     std::vector<std::string> audioTrackNames;
     double splitMinutes = 0;  // 0 = one file
+    std::function<void(const std::wstring& path)> onFileReady;  // called on the writer thread
 };
 
 // Manual recording fed by the same encoded packets as the replay buffer (no second

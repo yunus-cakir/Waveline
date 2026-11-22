@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>WavelineSettings</AssemblyName>
+    <RootNamespace>Waveline.Settings</RootNamespace>
+    <Product>Waveline Clip</Product>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Next to WavelineClip.exe so the engine can launch it. -->
+    <OutputPath>$(MSBuildThisFileDirectory)..\..\build\x64\$(Configuration)\</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+</Project>

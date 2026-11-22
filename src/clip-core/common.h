@@ -37,6 +37,7 @@ std::string ToUtf8(const wchar_t* w);
 
 void Log(const char* fmt, ...);
 void Warn(const char* fmt, ...);
+void SetLogFile(const std::wstring& path);  // also write the log to a file
 
 // QueryPerformanceCounter converted to 100 ns units. This is the same time base
 // WASAPI reports in IAudioCaptureClient::GetBuffer (u64QPCPosition), so audio and
