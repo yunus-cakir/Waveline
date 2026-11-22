@@ -94,8 +94,21 @@ Kayıt yapılırken (oyun ya da masaüstü) **Ctrl+Alt+F9** ile başlar, tekrar 
 | Program/PC çöktü | Manuel kayıt bir sonraki açılışta otomatik kurtarılır |
 
 Klip özellikleri:
-- **Dosya adı:** `oyunexe__YYYY-MM-DD__HH-mm-ss.mp4`; masaüstü için `Masaustu__...`.
+- **Klasörleme:** Her oyunun klipleri ve kayıtları kendi alt klasörüne gider: `E:\Clips\Counter-Strike 2\Counter-Strike-2__2026-11-22__20-15-00.mp4`. Masaüstü kayıtları `Masaüstü\` klasörüne yazılır. Oyun adı exe dosyasının ürün bilgisinden okunur (ör. `cs2.exe` → "Counter-Strike 2"); bulunamazsa pencere başlığı, o da yoksa exe adı kullanılır.
+- **Etiketler:** Her dosyaya oyun adı yazılır.
+  - Windows Gezgini'nde **Etiketler**, **Tür**, **Albüm**, **Başlık** ve **Açıklamalar** olarak görünür. Gezgin'de bu sütunlara göre sıralayabilir ve arayabilirsiniz.
+  - Oynatıcılarda ve düzenleyicilerde de standart MP4 etiketleri olarak görünür (title/album/genre/comment/encoder/date).
 - **İzler:** Ses izleri isimli: `Mix`, `Game`, `Chat`, `Media`, `Mic`.
+- **Dosya kimliği ve düzenleme bilgisi:** Her dosyada Waveline'a ait gizli etiketler de var. Dosyayla birlikte taşınırlar; ffprobe'da görünürler.
+  - `id`: dosyaya özel benzersiz kimlik. Taşınsa da, adı değişse de aynı kalır.
+  - `kind`: `clip` ya da `recording`.
+  - `game`: oyun adı.
+  - `edit`: ileride kütüphane/düzenleyicinin kullanacağı düzenleme bilgisi (JSON): favori, kırpma başı/sonu, her ses izinin seviyesi ve sessizliği. Bu bilgi dosyanın görüntü/ses verisine dokunmadan, sadece etiket yeniden yazılarak değiştirilir.
+
+  ```powershell
+  .\build\x64\Release\WavelineClip.exe --tags "E:\Clips\Counter-Strike 2\klip.mp4"            # etiketleri göster
+  .\build\x64\Release\WavelineClip.exe --favorite "E:\Clips\Counter-Strike 2\klip.mp4" on     # favoriye al
+  ```
 - **Süre:** Her saniyede bir keyframe olduğu için klip istenen süreden en fazla ~1 saniye uzun olur.
 - **Senkron:** Ses ve video aynı noktada biter.
 

@@ -1,4 +1,5 @@
 #pragma once
+#include "clip_saver.h"
 #include "packet.h"
 
 #include <mfapi.h>
@@ -22,6 +23,7 @@ struct RecorderConfig {
     std::vector<com_ptr<IMFMediaType>> audioTypes;
     std::vector<std::string> audioTrackNames;
     double splitMinutes = 0;  // 0 = one file
+    ClipMetadata metadata;
     std::function<void(const std::wstring& path)> onFileReady;  // called on the writer thread
 };
 

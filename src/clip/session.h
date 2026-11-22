@@ -19,8 +19,8 @@ enum class SessionEvent { ClipSaved, ClipFailed, RecordingStarted, RecordingStop
 
 struct SessionConfig {
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
-    std::wstring name;  // used in clip file names (game exe or "Masaustu")
-    std::wstring dir;
+    std::wstring name;  // game name ("Counter-Strike 2") or "Masaüstü": folder, file names, tags
+    std::wstring dir;   // base clip folder; files go to the <dir>\<name> subfolder
     double minutes = 1.0;
     UINT fps = 60;
     UINT kbps = 15000;
@@ -69,6 +69,7 @@ private:
     std::unique_ptr<ManualRecorder> recorder_;
 
     SessionConfig config_;
+    std::wstring folder_;  // <dir>\<game>
     GpuDevice gpu_;
     com_ptr<IMFDXGIDeviceManager> deviceManager_;
     std::unique_ptr<CaptureSource> capture_;

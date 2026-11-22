@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <vector>
 
 #pragma comment(lib, "dwmapi.lib")
+#pragma comment(lib, "version.lib")
 #pragma comment(lib, "shell32.lib")
 
 namespace wl {
@@ -49,17 +51,83 @@ bool CoversMonitor(HWND hwnd) {
 }
 }  // namespace
 
-std::wstring ExeNameOf(HWND hwnd) {
+std::wstring ExePathOf(HWND hwnd) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
-    std::wstring name;
+    std::wstring out;
     if (HANDLE h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid)) {
         wchar_t path[MAX_PATH];
         DWORD len = MAX_PATH;
-        if (QueryFullProcessImageNameW(h, 0, path, &len)) name = Lower(std::filesystem::path(path).stem().wstring());
+        if (QueryFullProcessImageNameW(h, 0, path, &len)) out = path;
         CloseHandle(h);
     }
-    return name;
+    return out;
+}
+
+std::wstring ExeNameOf(HWND hwnd) {
+    const std::wstring path = ExePathOf(hwnd);
+    return path.empty() ? std::wstring() : Lower(std::filesystem::path(path).stem().wstring());
+}
+
+namespace {
+std::wstring VersionString(const std::wstring& exe, const wchar_t* field) {
+    DWORD dummy = 0;
+    const DWORD size = GetFileVersionInfoSizeW(exe.c_str(), &dummy);
+    if (!size) return {};
+    std::vector<BYTE> data(size);
+    if (!GetFileVersionInfoW(exe.c_str(), 0, size, data.data())) return {};
+    struct Lang { WORD lang, codepage; }* langs = nullptr;
+    UINT bytes = 0;
+    if (!VerQueryValueW(data.data(), L"\\VarFileInfo\\Translation", reinterpret_cast<void**>(&langs), &bytes) || bytes < sizeof(Lang))
+        return {};
+    wchar_t key[96];
+    swprintf_s(key, L"\\StringFileInfo\\%04x%04x\\%s", langs[0].lang, langs[0].codepage, field);
+    wchar_t* value = nullptr;
+    UINT len = 0;
+    if (!VerQueryValueW(data.data(), key, reinterpret_cast<void**>(&value), &len) || !value || !len) return {};
+    std::wstring s(value);
+    s.erase(0, s.find_first_not_of(L" \t"));
+    s.erase(s.find_last_not_of(L" \t") + 1);
+    return s;
+}
+
+bool UsableName(const std::wstring& s) {
+    if (s.empty() || s.size() > 60) return false;
+    std::wstring l = Lower(s);
+    // engine/launcher names some games ship with instead of their own
+    for (const wchar_t* generic : {L"unreal engine", L"unity", L"bootstrap", L"launcher", L"game", L"application", L"win64",
+                                   L"shipping", L"client"})
+        if (l == generic) return false;
+    return l.find(L"unreal engine") == std::wstring::npos && l.find(L"operating system") == std::wstring::npos;
+}
+
+std::wstring CleanName(std::wstring s) {
+    s.erase(std::remove_if(s.begin(), s.end(), [](wchar_t c) { return c == L'®' || c == L'™' || c == L'©'; }),
+            s.end());
+    std::wstring out;  // collapse double spaces left behind
+    for (wchar_t c : s)
+        if (!(c == L' ' && !out.empty() && out.back() == L' ')) out += c;
+    out.erase(0, out.find_first_not_of(L' '));
+    out.erase(out.find_last_not_of(L' ') + 1);
+    return out;
+}
+}  // namespace
+
+// Human-readable game name for folders/tags: the exe's ProductName (e.g. "Counter-Strike 2"),
+// else its FileDescription, else the window title if short, else the exe name. Reads the
+// exe *file* on disk, not the game process.
+std::wstring FriendlyAppName(HWND hwnd) {
+    const std::wstring exe = ExePathOf(hwnd);
+    if (!exe.empty()) {
+        for (const wchar_t* field : {L"ProductName", L"FileDescription"}) {
+            const std::wstring v = CleanName(VersionString(exe, field));
+            if (UsableName(v)) return v;
+        }
+    }
+    wchar_t title[128] = {};
+    GetWindowTextW(hwnd, title, 128);
+    if (UsableName(title) && wcslen(title) <= 40) return title;
+    return exe.empty() ? L"Oyun" : std::filesystem::path(exe).stem().wstring();
 }
 
 std::set<std::wstring> GameDetector::DefaultExcludes() {

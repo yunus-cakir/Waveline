@@ -50,5 +50,8 @@ private:
 // Lower-case exe name (no extension) of a window's process. Uses only
 // PROCESS_QUERY_LIMITED_INFORMATION (anti-cheat rule 1).
 std::wstring ExeNameOf(HWND hwnd);
+std::wstring ExePathOf(HWND hwnd);
+// Human-readable name for folders and tags, e.g. "Counter-Strike 2" instead of "cs2".
+std::wstring FriendlyAppName(HWND hwnd);
 
 }  // namespace wl

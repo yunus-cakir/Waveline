@@ -29,6 +29,22 @@ std::wstring SafeFileName(std::wstring s) {
     return s.empty() ? L"Clip" : s;
 }
 
+// Folder per game: keeps spaces and letters, drops characters Windows does not allow.
+std::wstring SafeFolderName(std::wstring s) {
+    for (auto& c : s)
+        if (wcschr(L"<>:\"/\\|?*", c) || c < 32) c = L'_';
+    while (!s.empty() && (s.back() == L'.' || s.back() == L' ')) s.pop_back();
+    return s.empty() ? L"Diger" : s;
+}
+
+std::wstring NowText() {
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    wchar_t buf[32];
+    swprintf_s(buf, L"%02u.%02u.%04u %02u:%02u", st.wDay, st.wMonth, st.wYear, st.wHour, st.wMinute);
+    return buf;
+}
+
 std::wstring ClipPath(const std::wstring& dir, const std::wstring& target) {
     SYSTEMTIME st;
     GetLocalTime(&st);
@@ -111,6 +127,8 @@ void RecordingSession::Start() {
     Check(MFCreateDXGIDeviceManager(&resetToken, deviceManager_.put()), "MFCreateDXGIDeviceManager");
     Check(deviceManager_->ResetDevice(gpu_.device.get(), resetToken), "ResetDevice");
 
+    folder_ = config_.dir + L"\\" + SafeFolderName(config_.name);
+    std::filesystem::create_directories(folder_);
     capture_ = std::make_unique<CaptureSource>(config_.item);
     capture_->Start(gpu_, config_.cursor);
     CapturedFrame first;
@@ -225,12 +243,18 @@ void RecordingSession::SaveNow() {
         if (config_.onEvent) config_.onEvent(SessionEvent::DiskFull, config_.dir, 0);
         return;
     }
-    in.path = ClipPath(config_.dir, config_.name);
+    in.path = ClipPath(folder_, config_.name);
+    in.metadata.game = config_.name;
+    in.metadata.title = config_.name + L" – " + NowText();
+    in.metadata.comment = L"Waveline Clip – geriye dönük klip";
+    in.metadata.id = NewClipId();
+    in.metadata.kind = L"clip";
     in.videoType = video_.OutputTypeForMux();
     for (int t = 0; t < kTrackCount; ++t) {
         in.audioTypes.push_back(aac_.OutputTypeForMux(static_cast<UINT>(t)));
         in.audioTrackNames.push_back(TrackName(static_cast<Track>(t)));
     }
+    in.metadata.editJson = DefaultEditJson(in.audioTrackNames);
     if (saver_.joinable()) saver_.join();
     saving_ = true;
     saver_ = std::thread([this, in = std::move(in)]() {
@@ -270,13 +294,18 @@ void RecordingSession::StartRecording() {
     if (recorder_) return;
 
     RecorderConfig rc;
-    rc.basePath = ClipPath(config_.dir, config_.name + L"__kayit");
+    rc.basePath = ClipPath(folder_, config_.name + L"__kayit");
+    rc.metadata.game = config_.name;
+    rc.metadata.title = config_.name + L" – kayıt " + NowText();
+    rc.metadata.comment = L"Waveline Clip – manuel kayıt";
+    rc.metadata.kind = L"recording";  // id: one per output file, set by the recorder
     rc.basePath.resize(rc.basePath.size() - 4);  // drop ".mp4"
     rc.videoType = video_.OutputTypeForMux();
     for (int t = 0; t < kTrackCount; ++t) {
         rc.audioTypes.push_back(aac_.OutputTypeForMux(static_cast<UINT>(t)));
         rc.audioTrackNames.push_back(TrackName(static_cast<Track>(t)));
     }
+    rc.metadata.editJson = DefaultEditJson(rc.audioTrackNames);
     rc.splitMinutes = config_.splitMinutes;
     rc.onFileReady = [cb = config_.onEvent](const std::wstring& path) {
         if (cb) cb(SessionEvent::RecordingReady, path, 0);

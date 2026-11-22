@@ -312,7 +312,15 @@ double RecoverOne(const std::wstring& partsDir, const std::wstring& finalPath) {
     fs::remove(finalPath, ec);  // the interrupted file has no index and cannot be played
     fs::rename(tmp, finalPath, ec);
     if (ec) return 0;
-    Mp4SetTrackNames(finalPath, "Video", names);
+    // Recordings live in a per-game folder, so the folder name is the game.
+    ClipMetadata meta;
+    meta.game = fs::path(finalPath).parent_path().filename().wstring();
+    meta.title = fs::path(finalPath).stem().wstring();
+    meta.comment = L"Waveline Clip – kurtarılan kayıt";
+    meta.id = NewClipId();
+    meta.kind = L"recording";
+    meta.editJson = DefaultEditJson(names);
+    Mp4SetTrackNames(finalPath, "Video", names, meta);
     return base / 1e7;
 }
 
@@ -345,9 +353,15 @@ void WriteRecoveryInfo(const std::wstring& partsDir, IMFMediaType* video, const 
 void RecoverInterruptedRecordings(const std::wstring& dir, const std::function<void(const std::wstring&, double)>& onRecovered) {
     std::error_code ec;
     if (!fs::is_directory(dir, ec)) return;
+    // Recordings are in per-game subfolders; also look at the top level (older versions).
     std::vector<fs::path> partsDirs;
+    auto scan = [&](const fs::path& folder) {
+        for (const auto& e : fs::directory_iterator(folder, ec))
+            if (e.is_directory() && e.path().extension() == L".parts") partsDirs.push_back(e.path());
+    };
+    scan(dir);
     for (const auto& e : fs::directory_iterator(dir, ec))
-        if (e.is_directory() && e.path().extension() == L".parts") partsDirs.push_back(e.path());
+        if (e.is_directory() && e.path().extension() != L".parts") scan(e.path());
 
     for (const auto& parts : partsDirs) {
         fs::path final = parts;

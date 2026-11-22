@@ -7,6 +7,7 @@
 // %APPDATA%\Waveline\clip.json (edited by WavelineSettings.exe) and apply live.
 
 #include "background.h"
+#include "clip_saver.h"
 #include "recovery.h"
 #include "config.h"
 #include "game_detector.h"
@@ -52,6 +53,9 @@ struct Options {
     int autoSaveSec = 0;   // test aids
     int exitAfterSec = 0;
     int testRecordStart = -1, testRecordStop = -1;
+    std::wstring tagsFile;      // --tags FILE: print Waveline metadata
+    std::wstring favoriteFile;  // --favorite FILE on|off: change only the tag
+    bool favorite = true;
 };
 
 Options ParseArgs(int argc, wchar_t** argv) {
@@ -65,6 +69,8 @@ Options ParseArgs(int argc, wchar_t** argv) {
         if (a == L"--console") o.console = true;
         else if (a == L"--list") o.list = o.console = true;
         else if (a == L"--auto-save") o.autoSaveSec = std::stoi(next());
+        else if (a == L"--tags") o.tagsFile = next(), o.console = true;
+        else if (a == L"--favorite") { o.favoriteFile = next(); o.favorite = next() != L"off"; o.console = true; }
         else if (a == L"--exit-after") o.exitAfterSec = std::stoi(next());
         else if (a == L"--test-record") {
             const std::wstring v = next();
@@ -193,6 +199,30 @@ int RunList() {
     return 0;
 }
 
+// Prints (and optionally changes) the metadata Waveline stores in a clip.
+int RunTags(const Options& opt) {
+    const std::wstring path = opt.tagsFile.empty() ? opt.favoriteFile : opt.tagsFile;
+    ClipMetadata m;
+    if (!Mp4ReadMetadata(path, m)) {
+        std::printf("Etiket okunamadi: %s\n", ToUtf8(path).c_str());
+        return 1;
+    }
+    if (!opt.favoriteFile.empty()) {
+        const std::string from = opt.favorite ? "\"favorite\":false" : "\"favorite\":true";
+        const std::string to = opt.favorite ? "\"favorite\":true" : "\"favorite\":false";
+        if (const size_t pos = m.editJson.find(from); pos != std::string::npos) m.editJson.replace(pos, from.size(), to);
+        if (!Mp4WriteMetadata(path, m)) {
+            std::printf("Etiket yazilamadi: %s\n", ToUtf8(path).c_str());
+            return 1;
+        }
+        m = {};
+        Mp4ReadMetadata(path, m);
+    }
+    std::printf("id      : %s\nkind    : %s\ngame    : %s\ntitle   : %s\ndate    : %s\ncomment : %s\nedit    : %s\n",
+                ToUtf8(m.id).c_str(), ToUtf8(m.kind).c_str(), ToUtf8(m.game).c_str(), ToUtf8(m.title).c_str(),
+                ToUtf8(m.date).c_str(), ToUtf8(m.comment).c_str(), m.editJson.c_str());
+    return 0;
+}
 int Run(const Options& opt) {
     ClipConfig cfg = LoadConfig();
     std::wstring configPath = ConfigPath();
@@ -392,9 +422,10 @@ int Run(const Options& opt) {
             const GameCandidate game = detector.Stable(1500);
             if (game.hwnd) {
                 stopSession();
-                Log("Oyun algilandi: %s (%s)", ToUtf8(game.exe).c_str(), game.reason);
+                const std::wstring title = FriendlyAppName(game.hwnd);
+                Log("Oyun algilandi: %s [%s] (%s)", ToUtf8(title).c_str(), ToUtf8(game.exe).c_str(), game.reason);
                 try {
-                    SessionConfig c = sessionConfig(game.exe);
+                    SessionConfig c = sessionConfig(title);
                     c.item = CaptureSource::ItemForWindow(game.hwnd);
                     startSession(std::move(c), Mode::Game);
                     if (mode == Mode::Game) gameWindow = game.hwnd;
@@ -408,7 +439,7 @@ int Run(const Options& opt) {
             lastDesktopAttempt = now;
             const auto monitors = EnumerateMonitors();
             if (const MonitorEntry* m = PickDesktopMonitor(monitors, cfg.monitorDevice)) {
-                SessionConfig c = sessionConfig(L"Masaustu");
+                SessionConfig c = sessionConfig(L"Masaüstü");
                 c.item = CaptureSource::ItemForMonitor(m->handle);
                 startSession(std::move(c), Mode::Desktop);
             }
@@ -493,7 +524,8 @@ int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
 
     // One engine per user session: a second start just opens the settings window.
     HANDLE mutex = CreateMutexW(nullptr, TRUE, L"Local\\WavelineClipEngine");
-    if (GetLastError() == ERROR_ALREADY_EXISTS && !opt.list) {
+    const bool tool = opt.list || !opt.tagsFile.empty() || !opt.favoriteFile.empty();
+    if (GetLastError() == ERROR_ALREADY_EXISTS && !tool) {
         OpenSettingsApp();
         return 0;
     }
@@ -503,7 +535,7 @@ int APIENTRY wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         winrt::init_apartment(winrt::apartment_type::multi_threaded);
         SetLogFile(LocalDataDir() + L"\\clip.log");
         Check(MFStartup(MF_VERSION), "MFStartup");
-        rc = opt.list ? RunList() : Run(opt);
+        rc = opt.list ? RunList() : (!opt.tagsFile.empty() || !opt.favoriteFile.empty()) ? RunTags(opt) : Run(opt);
         MFShutdown();
     } catch (const HrError& e) {
         Warn("HATA: %s (HRESULT 0x%08X)", e.what(), static_cast<unsigned>(e.hr));

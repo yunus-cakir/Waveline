@@ -237,7 +237,10 @@ void ManualRecorder::FinishGroup() {
     std::error_code ec;
     wchar_t keep[8];
     if (!GetEnvironmentVariableW(L"WAVELINE_KEEP_PARTS", keep, 8)) std::filesystem::remove_all(partsDir_, ec);
-    const bool named = Mp4SetTrackNames(finalPath_, "Video", config_.audioTrackNames);
+    ClipMetadata meta = config_.metadata;
+    meta.id = NewClipId();  // every output file (split parts too) gets its own id
+    if (fileIndex_ > 1 && !meta.title.empty()) meta.title += L" (" + std::to_wstring(fileIndex_.load()) + L")";
+    const bool named = Mp4SetTrackNames(finalPath_, "Video", config_.audioTrackNames, meta);
     Log("Kayit hazir: %s%s", ToUtf8(finalPath_).c_str(), named ? "" : " [iz isimleri yazilamadi]");
     if (config_.onFileReady) config_.onFileReady(finalPath_);
 }
