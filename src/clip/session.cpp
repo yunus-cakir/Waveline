@@ -76,6 +76,16 @@ void SetupAudioSources(AudioEngine& engine, bool logChoices) {
             continue;
         }
         auto src = std::make_unique<AudioSource>(id, TrackName(w.track), !w.capture);
+        // After Sonar restarts (or the device is re-plugged) find the endpoint again by role.
+        src->SetResolver([role = w.role, capture = w.capture, hint = std::wstring(w.hint), track = w.track, sonar]() {
+            const auto now = EnumerateEndpoints();
+            for (const auto& e : now)
+                if (e.capture == capture && e.sonarRole == role) return e.id;
+            for (const auto& e : now)
+                if (e.capture == capture && e.name.find(hint) != std::wstring::npos) return e.id;
+            if (!sonar && (track == Track::Game || track == Track::Mic)) return DefaultEndpointId(capture);
+            return std::wstring();
+        });
         try {
             src->Open();
             if (logChoices) Log("Ses: %-5s <- %s", TrackName(w.track), ToUtf8(name).c_str());
@@ -180,6 +190,7 @@ void RecordingSession::Loop() {
             }
 
             if (saveRequested_.exchange(false)) SaveNow();
+            if (frames_ % fps == 0) CheckRecorderHealth();
         }
     } catch (const HrError& e) {
         Warn("Kayit durdu (%s): %s (0x%08X)", ToUtf8(config_.name).c_str(), e.what(), static_cast<unsigned>(e.hr));
@@ -200,6 +211,18 @@ void RecordingSession::SaveNow() {
     ClipSaveInput in;
     if (!ring_.TakeSnapshot(ring_.Duration(), in.snapshot)) {
         Warn("Tampon bos, klip alinamadi");
+        return;
+    }
+    // Disk space: the clip's size is known exactly (it is the snapshot's packets).
+    uint64_t bytes = 0;
+    for (const auto& p : in.snapshot.video) bytes += p.data->size();
+    for (const auto& track : in.snapshot.audio)
+        for (const auto& p : track) bytes += p.data->size();
+    ULARGE_INTEGER freeBytes{};
+    if (GetDiskFreeSpaceExW(config_.dir.c_str(), &freeBytes, nullptr, nullptr) &&
+        freeBytes.QuadPart < bytes + 200ull * 1024 * 1024) {
+        Warn("Diskte yer yok: klip %.0f MB, bos %.0f MB", bytes / 1048576.0, freeBytes.QuadPart / 1048576.0);
+        if (config_.onEvent) config_.onEvent(SessionEvent::DiskFull, config_.dir, 0);
         return;
     }
     in.path = ClipPath(config_.dir, config_.name);
@@ -283,6 +306,21 @@ void RecordingSession::StopRecording() {
     recorder->Stop();  // closes the last part; conversion continues in the background
     Log("Kayit durdu (manuel): %.1f sn, %d dosya", recorder->Seconds(), recorder->FileCount());
     if (config_.onEvent) config_.onEvent(SessionEvent::RecordingStopped, {}, recorder->Seconds());
+}
+
+void RecordingSession::CheckRecorderHealth() {
+    bool failed = false, diskFull = false;
+    {
+        std::lock_guard lock(tapMutex_);
+        if (recorder_ && recorder_->Failed()) {
+            failed = true;
+            diskFull = recorder_->DiskFull();
+        }
+    }
+    if (!failed) return;
+    StopRecording();
+    if (config_.onEvent)
+        config_.onEvent(diskFull ? SessionEvent::DiskFull : SessionEvent::RecordingFailed, config_.dir, 0);
 }
 
 double RecordingSession::RecordingSeconds() {

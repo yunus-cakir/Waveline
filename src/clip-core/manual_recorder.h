@@ -44,6 +44,9 @@ public:
 
     double Seconds() const { return seconds_; }
     int FileCount() const { return fileIndex_; }
+    // Writing stopped on its own (disk almost full or a write error); files are closed.
+    bool Failed() const { return failed_; }
+    bool DiskFull() const { return diskFull_; }
 
 private:
     void WriterLoop();
@@ -72,6 +75,7 @@ private:
     bool groupOpen_ = false;
     std::atomic<int> fileIndex_{0};
     std::atomic<double> seconds_{0};
+    std::atomic<bool> failed_{false}, diskFull_{false};
     int64_t firstPts_ = -1;
 };
 

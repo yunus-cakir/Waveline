@@ -26,6 +26,8 @@ class TrayApp {
 public:
     struct Callbacks {
         std::function<void()> saveClip, toggleRecording, openSettings, openFolder, quit;
+        std::function<void()> resumed;         // woke up from sleep/hibernate
+        std::function<void()> displayChanged;  // monitor layout or resolution changed
     };
 
     static constexpr const wchar_t* kWindowClass = L"WavelineClipTray";

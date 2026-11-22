@@ -4,7 +4,7 @@ SteelSeries Moments ve Sonar'ın hafif, açık kaynak karşılıkları.
 
 | Bileşen | Karşılığı | Durum |
 |---|---|---|
-| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M4 (tepsi + ayarlar) |
+| **Waveline Clip** | Moments: geriye dönük kayıt + manuel kayıt, 5 ses izi | M5 (tepsi + ayarlar, sağlamlaştırma) |
 | **Waveline Mix** | Sonar: Game / Chat / Media / Mic katmanları, Personal + Stream Mix | Planlandı |
 
 Analiz, mimari ve kararlar: [ANALIZ_VE_PLAN.md](ANALIZ_VE_PLAN.md)
@@ -80,11 +80,18 @@ Kayıt yapılırken (oyun ya da masaüstü) **Ctrl+Alt+F9** ile başlar, tekrar 
 - **Başlangıç anı:** Kayıt, tamponda bekleyen son keyframe'den başlar; yani tuşa basmadan en fazla ~1 sn öncesi de kayda girer.
 - **Dosya:** `oyunexe__kayit__YYYY-MM-DD__HH-mm-ss.mp4` olarak yazılır ve kayıt durduğu anda hazırdır; dönüştürme beklenmez. ayarlardaki bölme seçeneğiyle `_2`, `_3`… parçalarına bölünür.
 - **Kaydın bitişi:** Oyun kapanınca kayıt da kendiliğinden durur.
-- **Çökme yedeği:** Kayıt sürerken yanında `...kayit....parts\` klasörüne 10 saniyelik, tek başına oynatılabilen yedek bölümler yazılır. Program normal kapanırsa bu klasör silinir. Program ya da bilgisayar çökerse asıl MP4 açılmaz, ama bölümler durur: en fazla son ~10 sn kaybolur. Bölümleri tek dosyada birleştirmek için:
-  ```powershell
-  cd "E:\Records\oyun__kayit__....parts"; (Get-ChildItem *.mp4 | Sort-Object Name | ForEach-Object { "file '$($_.Name)'" }) | Set-Content list.txt; ffmpeg -f concat -safe 0 -i list.txt -map 0 -c copy ..\kurtarilan.mp4
-  ```
-  (Otomatik kurtarma M5'te gelecek.)
+- **Çökme yedeği ve otomatik kurtarma:** Kayıt sürerken yanında `...kayit....parts\` klasörüne 10 saniyelik, tek başına oynatılabilen yedek bölümler yazılır; program normal kapanırsa bu klasör silinir. Program ya da bilgisayar çökerse, Waveline Clip bir sonraki açılışta yarım kalan kaydı bu bölümlerden **kendiliğinden** aynı isimle yeniden oluşturur ve bildirim gösterir. En fazla son ~10 sn kaybolur.
+
+### Dayanıklılık (M5)
+
+| Durum | Davranış |
+|---|---|
+| Sonar yeniden başladı / kulaklık çıkıp takıldı | İlgili ses izi saniyede bir yeniden bağlanmayı dener, cihazı Sonar rolüyle yeniden bulur. Aradaki süre sessizlikle dolar, senkron kaymaz |
+| Uykudan uyanma | Kayıt temiz şekilde yeniden başlar |
+| Monitör düzeni değişti (masaüstü modu) | Masaüstü kaydı yeniden başlar; oyun içi çözünürlük değişikliği kesintisiz işlenir |
+| GPU sürücüsü sıfırlandı / yakalama hatası | Oturum kapanır, oyun hâlâ açıksa ~1.5 sn içinde yeniden algılanıp kayıt sürer |
+| Disk dolu | Klip, boyutu kadar yer yoksa kaydedilmez. Manuel kayıt 1 GB'tan az yer kalınca dosyayı düzgün kapatıp durur. Her ikisinde bildirim çıkar |
+| Program/PC çöktü | Manuel kayıt bir sonraki açılışta otomatik kurtarılır |
 
 Klip özellikleri:
 - **Dosya adı:** `oyunexe__YYYY-MM-DD__HH-mm-ss.mp4`; masaüstü için `Masaustu__...`.

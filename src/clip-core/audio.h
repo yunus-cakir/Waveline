@@ -6,6 +6,7 @@
 
 #include <array>
 #include <atomic>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -49,6 +50,7 @@ struct SourceStats {
     uint64_t gapFilledFrames = 0;       // holes between packets filled with silence
     uint64_t overlapDroppedFrames = 0;  // late/overlapping data dropped
     uint64_t deadlineFilledFrames = 0;  // no packet in time (silent loopback) -> silence
+    uint64_t reconnects = 0;
     bool deviceLost = false;
 };
 
@@ -63,6 +65,9 @@ public:
     AudioSource& operator=(const AudioSource&) = delete;
 
     void Open();                     // initialise the device (throws on failure)
+    // Finds the device again after it disappeared (by Sonar role), so reconnects survive
+    // a changed endpoint id. Without it the original id is retried.
+    void SetResolver(std::function<std::wstring()> resolver) { resolver_ = std::move(resolver); }
     void Start(int64_t startHns);    // timeline frame 0 == startHns
     void Stop();
 
@@ -76,7 +81,9 @@ public:
 
 private:
     void Run();
+    bool TryReopen();
     void Push(int64_t pos, const float* data, uint32_t frames);
+    std::function<std::wstring()> resolver_;
     int64_t WritePosLocked() const { return fifoPos_ + static_cast<int64_t>(fifo_.size() / kChannels); }
 
     std::wstring deviceId_;

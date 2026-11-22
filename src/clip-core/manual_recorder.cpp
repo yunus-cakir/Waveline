@@ -1,6 +1,7 @@
 ﻿#include "manual_recorder.h"
 #include "background.h"
 #include "clip_saver.h"
+#include "recovery.h"
 
 #include <mferror.h>
 
@@ -115,8 +116,15 @@ void ManualRecorder::WriterLoop() {
         }
     } catch (const HrError& e) {
         Warn("Kayit dosyasina yazilamadi: %s (0x%08X)", e.what(), static_cast<unsigned>(e.hr));
+        failed_ = true;
     } catch (const std::exception& e) {
         Warn("Kayit dosyasina yazilamadi: %s", e.what());
+        failed_ = true;
+    }
+    if (failed_) {  // drop what is queued; keep accepting (and discarding) packets until Stop
+        std::lock_guard lock(mutex_);
+        for (auto& q : queues_) q.clear();
+        stopping_ = true;
     }
     try {
         CloseSegment();
@@ -188,11 +196,19 @@ void ManualRecorder::StartGroup(int64_t pts) {
     std::filesystem::create_directories(partsDir_);
     groupStartPts_ = pts;
     segmentCount_ = 0;
+    WriteRecoveryInfo(partsDir_, config_.videoType.get(), config_.audioTypes, config_.audioTrackNames);
     finalWriter_ = CreateMp4Writer(finalPath_, config_, finalStreams_);
     Log("Kayit dosyasi: %s", ToUtf8(finalPath_).c_str());
 }
 
 void ManualRecorder::OpenSegment(int64_t pts) {
+    // Stop cleanly (final file closed and playable) before the disk is actually full.
+    ULARGE_INTEGER freeBytes{};
+    if (GetDiskFreeSpaceExW(partsDir_.c_str(), &freeBytes, nullptr, nullptr) &&
+        freeBytes.QuadPart < 1024ull * 1024 * 1024) {
+        diskFull_ = true;
+        throw HrError(HRESULT_FROM_WIN32(ERROR_DISK_FULL), "Diskte 1 GB'tan az bos alan kaldi");
+    }
     segStartPts_ = pts;
     wchar_t name[32];
     swprintf_s(name, L"\\%05zu.mp4", ++segmentCount_);

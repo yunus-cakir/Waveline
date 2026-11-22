@@ -15,7 +15,7 @@
 
 namespace wl {
 
-enum class SessionEvent { ClipSaved, ClipFailed, RecordingStarted, RecordingStopped, RecordingReady };
+enum class SessionEvent { ClipSaved, ClipFailed, RecordingStarted, RecordingStopped, RecordingReady, DiskFull, RecordingFailed };
 
 struct SessionConfig {
     winrt::Windows::Graphics::Capture::GraphicsCaptureItem item{nullptr};
@@ -59,6 +59,7 @@ public:
 private:
     void Loop();
     void SaveNow();
+    void CheckRecorderHealth();
     void OnVideoPacket(Packet&& p);
     void OnAudioPacket(UINT track, Packet&& p);
 

@@ -308,6 +308,12 @@ LRESULT TrayApp::Handle(UINT msg, WPARAM wp, LPARAM lp) {
             hotkeyResult_.second = record_.Valid() && RegisterHotKey(hwnd_, 2, record_.modifiers | MOD_NOREPEAT, record_.vk);
             return 0;
         }
+        case WM_POWERBROADCAST:
+            if (wp == PBT_APMRESUMEAUTOMATIC && cb_.resumed) cb_.resumed();
+            return TRUE;
+        case WM_DISPLAYCHANGE:
+            if (cb_.displayChanged) cb_.displayChanged();
+            return 0;
         case WM_HOTKEY:
             if (wp == 1 && cb_.saveClip) cb_.saveClip();
             if (wp == 2 && cb_.toggleRecording) cb_.toggleRecording();

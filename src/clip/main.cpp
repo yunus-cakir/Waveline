@@ -7,6 +7,7 @@
 // %APPDATA%\Waveline\clip.json (edited by WavelineSettings.exe) and apply live.
 
 #include "background.h"
+#include "recovery.h"
 #include "config.h"
 #include "game_detector.h"
 #include "metrics.h"
@@ -34,6 +35,8 @@ namespace {
 std::atomic<bool> g_stop{false};
 std::atomic<bool> g_saveRequested{false};
 std::atomic<bool> g_recordToggle{false};
+std::atomic<bool> g_resumed{false};
+std::atomic<bool> g_displayChanged{false};
 
 BOOL WINAPI OnConsoleCtrl(DWORD type) {
     if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
@@ -209,6 +212,8 @@ int Run(const Options& opt) {
         [] { OpenSettingsApp(); },
         [&] { ShellExecuteW(nullptr, L"open", clipDir().c_str(), nullptr, nullptr, SW_SHOWNORMAL); },
         [] { g_stop = true; },
+        [] { g_resumed = true; },
+        [] { g_displayChanged = true; },
     });
     auto applyHotkeys = [&]() {
         const auto [clipOk, recOk] = tray.SetHotkeys(ParseHotkey(cfg.clipHotkey), ParseHotkey(cfg.recordHotkey));
@@ -262,6 +267,14 @@ int Run(const Options& opt) {
             case SessionEvent::RecordingStopped:
                 sound.Play(Chime::RecordStop);
                 break;
+            case SessionEvent::DiskFull:
+                sound.Play(Chime::Error);
+                tray.Notify(L"Diskte yer kalmadı", L"Klip/kayıt durduruldu: " + path + L". Yer açın ya da ayarlardan başka bir klasör seçin.");
+                break;
+            case SessionEvent::RecordingFailed:
+                sound.Play(Chime::Error);
+                tray.Notify(L"Kayıt yazılamadı", L"Kayıt durduruldu, o ana kadarki kısım kaydedildi. Ayrıntılar: clip.log");
+                break;
             case SessionEvent::RecordingReady:
                 if (notifications) tray.Notify(L"KayÄ±t hazÄ±r", file, path);
                 break;
@@ -313,6 +326,13 @@ int Run(const Options& opt) {
         }
     };
 
+    // Rebuild recordings interrupted by a crash or power loss (in the background).
+    BackgroundTasks::Instance().Run([dir = clipDir(), &tray] {
+        RecoverInterruptedRecordings(dir, [&tray](const std::wstring& path, double seconds) {
+            tray.Notify(L"Yarım kalan kayıt kurtarıldı (" + FormatDuration(seconds) + L")",
+                        std::filesystem::path(path).filename().wstring(), path);
+        });
+    });
     Log("Hazir. Klip: %s, kayit: %s. Klasor: %s", ToUtf8(cfg.clipHotkey).c_str(), ToUtf8(cfg.recordHotkey).c_str(),
         ToUtf8(clipDir()).c_str());
 
@@ -353,7 +373,19 @@ int Run(const Options& opt) {
             }
         }
 
-        if (session && session->Ended()) stopSession();
+        // After sleep, capture and audio devices are often stale: start over cleanly.
+        if (g_resumed.exchange(false)) {
+            Log("Uykudan uyanildi, kayit yeniden baslatiliyor");
+            stopSession();
+            lastDesktopAttempt = 0;
+        }
+        // Monitor layout changed: the desktop capture may point at a moved/removed monitor.
+        // (In a game, resolution changes are handled by the capture itself.)
+        if (g_displayChanged.exchange(false) && mode == Mode::Desktop) {
+            Log("Ekran duzeni degisti, masaustu kaydi yeniden baslatiliyor");
+            stopSession();
+            lastDesktopAttempt = 0;
+        }        if (session && session->Ended()) stopSession();
         if (mode == Mode::Game && !IsWindow(gameWindow)) stopSession();
 
         if (mode != Mode::Game) {

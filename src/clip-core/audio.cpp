@@ -148,7 +148,7 @@ void AudioSource::Open() {
     Check(client_->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, kDeviceBufferHns, 0, &wf.Format, nullptr),
           "IAudioClient::Initialize");
 
-    event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+    if (!event_) event_ = CreateEventW(nullptr, FALSE, FALSE, nullptr);
     if (!event_) Check(HRESULT_FROM_WIN32(GetLastError()), "CreateEvent");
     Check(client_->SetEventHandle(event_), "IAudioClient::SetEventHandle");
     Check(client_->GetService(IID_PPV_ARGS(capture_.put())), "IAudioClient::GetService(capture)");
@@ -174,7 +174,25 @@ void AudioSource::Run() {
     HANDLE mmcss = AvSetMmThreadCharacteristicsW(L"Pro Audio", &taskIndex);
 
     std::vector<float> temp;
+    bool lost = false;
+    int64_t nextRetry = 0;
     while (running_) {
+        if (lost) {
+            // Device gone (Sonar restarted, headset unplugged...): retry every second. The
+            // engine keeps filling this track with silence, so the timeline never shifts.
+            if (QpcNow100ns() < nextRetry) {
+                Sleep(100);
+                continue;
+            }
+            nextRetry = QpcNow100ns() + kHns;
+            if (!TryReopen()) continue;
+            lost = false;
+            std::lock_guard lock(mutex_);
+            ++stats_.reconnects;
+            stats_.deviceLost = false;
+            Log("%s: ses cihazina yeniden baglanildi", label_.c_str());
+        }
+
         WaitForSingleObject(event_, 100);
         if (!running_) break;
 
@@ -208,16 +226,39 @@ void AudioSource::Run() {
             capture_->ReleaseBuffer(frames);
             hr = capture_->GetNextPacketSize(&next);
         }
-        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) {
-            // M0 only reports this; M5 reopens the device (e.g. when Sonar restarts).
-            std::lock_guard lock(mutex_);
-            if (!stats_.deviceLost) Warn("%s: ses cihazi kayboldu, iz sessizlikle devam ediyor", label_.c_str());
-            stats_.deviceLost = true;
-            running_ = false;
+        if (FAILED(hr)) {  // AUDCLNT_E_DEVICE_INVALIDATED, AUDCLNT_E_SERVICE_NOT_RUNNING, ...
+            {
+                std::lock_guard lock(mutex_);
+                stats_.deviceLost = true;
+            }
+            Warn("%s: ses cihazi kayboldu (0x%08X), yeniden baglanmaya calisiliyor", label_.c_str(),
+                 static_cast<unsigned>(hr));
+            if (client_) client_->Stop();
+            capture_ = nullptr;
+            client_ = nullptr;
+            lost = true;
+            nextRetry = QpcNow100ns() + kHns;
         }
     }
 
     if (mmcss) AvRevertMmThreadCharacteristics(mmcss);
+}
+
+bool AudioSource::TryReopen() {
+    try {
+        if (resolver_) {
+            const std::wstring id = resolver_();
+            if (id.empty()) return false;
+            deviceId_ = id;  // the endpoint may come back with a new id
+        }
+        Open();
+        Check(client_->Start(), "IAudioClient::Start");
+        return true;
+    } catch (const HrError&) {
+        capture_ = nullptr;
+        client_ = nullptr;
+        return false;
+    }
 }
 
 void AudioSource::Push(int64_t pos, const float* data, uint32_t frames) {
